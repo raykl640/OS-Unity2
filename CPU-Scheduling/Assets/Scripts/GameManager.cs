@@ -143,9 +143,9 @@ private GameObject CreateProcessVisual(ProcessData process)
     
     // Calculate horizontal offset based on process ID (1cm is approximately 37.8 pixels)
     float horizontalOffset = (process.processId - 1) * 37.8f;
-    // Increased vertical offset to accommodate larger text box
-    textRect.anchoredPosition = new Vector2(horizontalOffset, 25);
-    // Increased height by 28.35 pixels (0.75cm)
+    // Updated vertical offset: original 25 + 37.8 (1cm) = 62.8
+    textRect.anchoredPosition = new Vector2(horizontalOffset, 62.8f);
+    // Maintain the same height as before
     textRect.sizeDelta = new Vector2(100, 78.35f);
     
     // Set process color
@@ -159,6 +159,7 @@ private GameObject CreateProcessVisual(ProcessData process)
     return obj;
 }
 
+// Also need to update the UpdateProcessVisual function to maintain the new position
 private void UpdateProcessVisual(GameObject processObj, float progress, ProcessData process)
 {
     // Update position
@@ -177,7 +178,8 @@ private void UpdateProcessVisual(GameObject processObj, float progress, ProcessD
         if (textRect != null)
         {
             float horizontalOffset = (process.processId - 1) * 37.8f;
-            textRect.anchoredPosition = new Vector2(horizontalOffset, 25);
+            // Updated vertical position to match CreateProcessVisual
+            textRect.anchoredPosition = new Vector2(horizontalOffset, 62.8f);
         }
         
         if (progress >= 0.99f && !processObj.CompareTag("Completed"))
@@ -327,18 +329,24 @@ private System.Collections.IEnumerator RunSJF()
 
     while (remainingProcesses.Count > 0)
     {
+        // Get all processes that have arrived by the current time
         List<ProcessData> availableProcesses = remainingProcesses.FindAll(p => p.arrivalTime <= currentTime);
 
         if (availableProcesses.Count == 0)
         {
-            currentTime += Time.deltaTime;
-            yield return null;
+            // If no processes available, move time to next arrival
+            float nextArrival = remainingProcesses.Min(p => p.arrivalTime);
+            currentTime = nextArrival;
             continue;
         }
 
+        // Select the process with shortest burst time among available processes
         ProcessData shortestJob = availableProcesses.OrderBy(p => p.burstTime).First();
         remainingProcesses.Remove(shortestJob);
 
+        // Calculate waiting time from when process arrived until it starts
+        shortestJob.waitingTime = currentTime - shortestJob.arrivalTime;
+        
         GameObject processObj = CreateProcessVisual(shortestJob);
         if (processObj != null)
         {
@@ -358,7 +366,6 @@ private System.Collections.IEnumerator RunSJF()
             currentTime += shortestJob.burstTime;
             shortestJob.completionTime = currentTime;
             shortestJob.turnaroundTime = shortestJob.completionTime - shortestJob.arrivalTime;
-            shortestJob.waitingTime = shortestJob.turnaroundTime - shortestJob.burstTime;
 
             // Add delay before destroying the object
             float delayTime = 0f;
@@ -376,12 +383,22 @@ private System.Collections.IEnumerator RunSJF()
         }
     }
 }
- private System.Collections.IEnumerator RunRoundRobin()
+// Fix 1: RunRoundRobin - Adding proper waiting time calculation and fixing time tracking
+private System.Collections.IEnumerator RunRoundRobin()
 {
     Queue<ProcessData> processQueue = new Queue<ProcessData>();
     List<ProcessData> remainingProcesses = new List<ProcessData>(processes);
     Dictionary<int, GameObject> activeProcessObjects = new Dictionary<int, GameObject>();
+    Dictionary<int, float> processStartTimes = new Dictionary<int, float>(); // Track when each process first starts
+    Dictionary<int, float> totalExecutionTime = new Dictionary<int, float>(); // Track total execution time per process
     float currentTime = 0f;
+
+    // Initialize tracking dictionaries
+    foreach (ProcessData process in processes)
+    {
+        processStartTimes[process.processId] = -1; // -1 indicates not started
+        totalExecutionTime[process.processId] = 0f;
+    }
 
     while (remainingProcesses.Count > 0 || processQueue.Count > 0)
     {
@@ -401,9 +418,15 @@ private System.Collections.IEnumerator RunSJF()
         }
 
         ProcessData currentProcess = processQueue.Dequeue();
+        
+        // Record first start time if not already recorded
+        if (processStartTimes[currentProcess.processId] == -1)
+        {
+            processStartTimes[currentProcess.processId] = currentTime;
+        }
+
         GameObject processObj;
 
-        // Check if process already has a visual representation
         if (!activeProcessObjects.ContainsKey(currentProcess.processId))
         {
             processObj = CreateProcessVisual(currentProcess);
@@ -423,7 +446,8 @@ private System.Collections.IEnumerator RunSJF()
             while (executionProgress < executeTime)
             {
                 executionProgress += Time.deltaTime;
-                float totalProgress = 1f - (currentProcess.remainingTime - executionProgress) / currentProcess.burstTime;
+                totalExecutionTime[currentProcess.processId] += Time.deltaTime;
+                float totalProgress = totalExecutionTime[currentProcess.processId] / currentProcess.burstTime;
                 UpdateProcessVisual(processObj, totalProgress, currentProcess);
                 yield return null;
             }
@@ -435,15 +459,14 @@ private System.Collections.IEnumerator RunSJF()
             {
                 processQueue.Enqueue(currentProcess);
                 ShowContextSwitch();
-                // Process object remains active
             }
             else
             {
                 currentProcess.completionTime = currentTime;
                 currentProcess.turnaroundTime = currentProcess.completionTime - currentProcess.arrivalTime;
+                // Correct waiting time calculation: total time - burst time
                 currentProcess.waitingTime = currentProcess.turnaroundTime - currentProcess.burstTime;
 
-                // Add delay before destroying the completed process
                 float delayTime = 0f;
                 while (delayTime < 0.3f)
                 {
@@ -451,7 +474,6 @@ private System.Collections.IEnumerator RunSJF()
                     yield return null;
                 }
 
-                // Remove and destroy the process object only when it's completely finished
                 if (processObj != null)
                 {
                     activeProcessObjects.Remove(currentProcess.processId);
@@ -462,15 +484,15 @@ private System.Collections.IEnumerator RunSJF()
         }
     }
 }
-
 private void CalculateAndDisplayStats()
 {
     float totalWaitingTime = 0f;
     float totalTurnaroundTime = 0f;
+    float totalBurstTime = 0f;
+    float maxCompletionTime = 0f;
     
     string detailedStats = "Process Statistics:\n\n";
     
-    // Create lists to store individual process details
     List<string> processIds = new List<string>();
     List<string> waitingTimes = new List<string>();
     List<string> turnaroundTimes = new List<string>();
@@ -480,6 +502,8 @@ private void CalculateAndDisplayStats()
     {
         totalWaitingTime += process.waitingTime;
         totalTurnaroundTime += process.turnaroundTime;
+        totalBurstTime += process.burstTime;
+        maxCompletionTime = Mathf.Max(maxCompletionTime, process.completionTime);
         
         processIds.Add($"Process {process.processId}");
         waitingTimes.Add($"{process.waitingTime:F2}");
@@ -490,7 +514,6 @@ private void CalculateAndDisplayStats()
     float avgWaitingTime = totalWaitingTime / processes.Count;
     float avgTurnaroundTime = totalTurnaroundTime / processes.Count;
     
-    // Format the statistics in columns
     detailedStats += string.Format("{0,-15}{1,-15}{2,-15}{3,-15}\n",
         "Process", "W.T", "T.T", "C.T");
     
@@ -504,7 +527,7 @@ private void CalculateAndDisplayStats()
     }
     
     detailedStats += $"\nAverage Waiting Time: {avgWaitingTime:F2}\n" +
-                    $"Average Turnaround Time: {avgTurnaroundTime:F2}\n\n" +
+                    $"Average Turnaround Time: {avgTurnaroundTime:F2}\n" +
                     $"Total Processes: {processes.Count}";
     
     statsText.text = detailedStats;
