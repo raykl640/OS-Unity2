@@ -119,37 +119,67 @@ public class GameManager : MonoBehaviour
         explanationText.text = explanation;
     }
 
-    private GameObject CreateProcessVisual(ProcessData process)
+private GameObject CreateProcessVisual(ProcessData process)
+{
+    // Create main process object
+    GameObject obj = Instantiate(processPrefab);
+    
+    // Create UI text as a direct child of the process
+    GameObject textObj = new GameObject("ProcessText");
+    textObj.transform.SetParent(obj.transform, false);
+    
+    // Add Text component
+    TMP_Text processText = textObj.AddComponent<TextMeshProUGUI>();
+    processText.text = $"P{process.processId}\n0%";
+    processText.fontSize = 24;
+    processText.alignment = TextAlignmentOptions.Center;
+    processText.color = Color.black;
+    
+    // Set up RectTransform for proper positioning
+    RectTransform textRect = textObj.GetComponent<RectTransform>();
+    textRect.anchorMin = new Vector2(0.5f, 1f);
+    textRect.anchorMax = new Vector2(0.5f, 1f);
+    textRect.pivot = new Vector2(0.5f, 0f);
+    
+    // Calculate horizontal offset based on process ID (1cm is approximately 37.8 pixels)
+    float horizontalOffset = (process.processId - 1) * 37.8f;
+    // Increased vertical offset to accommodate larger text box
+    textRect.anchoredPosition = new Vector2(horizontalOffset, 25);
+    // Increased height by 28.35 pixels (0.75cm)
+    textRect.sizeDelta = new Vector2(100, 78.35f);
+    
+    // Set process color
+    Image processImage = obj.GetComponent<Image>();
+    if (processImage != null)
     {
-        GameObject obj = Instantiate(processPrefab);
-        obj.GetComponentInChildren<TMP_Text>().text = $"P{process.processId}";
-        
-        // Set process color
-        Image processImage = obj.GetComponent<Image>();
-        if (processImage != null)
-        {
-            processImage.color = process.processColor;
-        }
-        
-        processObjects.Add(obj);
-        return obj;
+        processImage.color = process.processColor;
     }
+    
+    processObjects.Add(obj);
+    return obj;
+}
 
-    private void UpdateProcessVisual(GameObject processObj, float progress, ProcessData process)
+private void UpdateProcessVisual(GameObject processObj, float progress, ProcessData process)
+{
+    // Update position
+    Vector3 startPos = new Vector3(-6f, 0f, 0f);
+    Vector3 endPos = new Vector3(6f, 0f, 0f);
+    processObj.transform.position = Vector3.Lerp(startPos, endPos, progress);
+    
+    // Find and update the text
+    TMP_Text processText = processObj.GetComponentInChildren<TextMeshProUGUI>();
+    if (processText != null)
     {
-        // Update position
-        Vector3 startPos = new Vector3(-6f, 0f, 0f);
-        Vector3 endPos = new Vector3(6f, 0f, 0f);
-        processObj.transform.position = Vector3.Lerp(startPos, endPos, progress);
+        processText.text = $"P{process.processId}\n{(progress * 100):F0}%";
         
-        // Update progress text
-        TMP_Text progressText = processObj.GetComponentInChildren<TMP_Text>();
-        if (progressText != null)
+        // Maintain the horizontal offset during updates and use updated vertical position
+        RectTransform textRect = processText.GetComponent<RectTransform>();
+        if (textRect != null)
         {
-            progressText.text = $"P{process.processId}\n{(progress * 100):F0}%";
+            float horizontalOffset = (process.processId - 1) * 37.8f;
+            textRect.anchoredPosition = new Vector2(horizontalOffset, 25);
         }
         
-        // Visual feedback
         if (progress >= 0.99f && !processObj.CompareTag("Completed"))
         {
             processObj.tag = "Completed";
@@ -158,9 +188,30 @@ public class GameManager : MonoBehaviour
                 Instantiate(completionParticles, processObj.transform.position, Quaternion.identity);
             }
             PlaySound(processCompleteSound);
+            processText.color = Color.green;
+            processText.text = $"P{process.processId}\nComplete!";
         }
     }
-
+}
+private void Update()
+{
+    // Ensure text always faces camera
+    Camera mainCamera = Camera.main;
+    if (mainCamera != null)
+    {
+        foreach (GameObject processObj in processObjects)
+        {
+            if (processObj != null)
+            {
+                Canvas canvas = processObj.GetComponentInChildren<Canvas>();
+                if (canvas != null)
+                {
+                    canvas.transform.forward = mainCamera.transform.forward;
+                }
+            }
+        }
+    }
+}
     private void PlaySound(AudioClip clip)
     {
         if (audioSource != null && clip != null)
@@ -325,14 +376,16 @@ private System.Collections.IEnumerator RunSJF()
         }
     }
 }
-  private System.Collections.IEnumerator RunRoundRobin()
+ private System.Collections.IEnumerator RunRoundRobin()
 {
     Queue<ProcessData> processQueue = new Queue<ProcessData>();
     List<ProcessData> remainingProcesses = new List<ProcessData>(processes);
+    Dictionary<int, GameObject> activeProcessObjects = new Dictionary<int, GameObject>();
     float currentTime = 0f;
 
     while (remainingProcesses.Count > 0 || processQueue.Count > 0)
     {
+        // Check for newly arrived processes
         List<ProcessData> newProcesses = remainingProcesses.FindAll(p => p.arrivalTime <= currentTime);
         foreach (ProcessData process in newProcesses)
         {
@@ -348,23 +401,30 @@ private System.Collections.IEnumerator RunSJF()
         }
 
         ProcessData currentProcess = processQueue.Dequeue();
-        GameObject processObj = CreateProcessVisual(currentProcess);
-        
+        GameObject processObj;
+
+        // Check if process already has a visual representation
+        if (!activeProcessObjects.ContainsKey(currentProcess.processId))
+        {
+            processObj = CreateProcessVisual(currentProcess);
+            activeProcessObjects[currentProcess.processId] = processObj;
+            PlaySound(processStartSound);
+        }
+        else
+        {
+            processObj = activeProcessObjects[currentProcess.processId];
+        }
+
         if (processObj != null)
         {
-            PlaySound(processStartSound);
-
             float executeTime = Mathf.Min(timeQuantum, currentProcess.remainingTime);
             float executionProgress = 0f;
 
             while (executionProgress < executeTime)
             {
                 executionProgress += Time.deltaTime;
-                if (processObj != null)
-                {
-                    float totalProgress = 1f - (currentProcess.remainingTime - executionProgress) / currentProcess.burstTime;
-                    UpdateProcessVisual(processObj, totalProgress, currentProcess);
-                }
+                float totalProgress = 1f - (currentProcess.remainingTime - executionProgress) / currentProcess.burstTime;
+                UpdateProcessVisual(processObj, totalProgress, currentProcess);
                 yield return null;
             }
 
@@ -375,6 +435,7 @@ private System.Collections.IEnumerator RunSJF()
             {
                 processQueue.Enqueue(currentProcess);
                 ShowContextSwitch();
+                // Process object remains active
             }
             else
             {
@@ -382,23 +443,26 @@ private System.Collections.IEnumerator RunSJF()
                 currentProcess.turnaroundTime = currentProcess.completionTime - currentProcess.arrivalTime;
                 currentProcess.waitingTime = currentProcess.turnaroundTime - currentProcess.burstTime;
 
-                // Add delay before destroying the object
+                // Add delay before destroying the completed process
                 float delayTime = 0f;
                 while (delayTime < 0.3f)
                 {
                     delayTime += Time.deltaTime;
                     yield return null;
                 }
-            }
 
-            if (processObj != null)
-            {
-                Destroy(processObj);
-                processObjects.Remove(processObj);
+                // Remove and destroy the process object only when it's completely finished
+                if (processObj != null)
+                {
+                    activeProcessObjects.Remove(currentProcess.processId);
+                    Destroy(processObj);
+                    processObjects.Remove(processObj);
+                }
             }
         }
     }
 }
+
 private void CalculateAndDisplayStats()
 {
     float totalWaitingTime = 0f;
@@ -446,25 +510,25 @@ private void CalculateAndDisplayStats()
     statsText.text = detailedStats;
 }
 
-    private void ResetSimulation()
+   private void ResetSimulation()
+{
+    StopAllCoroutines();
+    isSimulationRunning = false;
+
+    foreach (GameObject obj in processObjects)
     {
-        StopAllCoroutines();
-        isSimulationRunning = false;
-
-        foreach (GameObject obj in processObjects)
-        {
-            if (obj != null) Destroy(obj);
-        }
-        processObjects.Clear();
-
-        foreach (ProcessData process in processes)
-        {
-            process.remainingTime = process.burstTime;
-            process.waitingTime = 0f;
-            process.turnaroundTime = 0f;
-            process.completionTime = 0f;
-        }
-
-        statsText.text = "";
+        if (obj != null) Destroy(obj);
     }
+    processObjects.Clear();
+
+    foreach (ProcessData process in processes)
+    {
+        process.remainingTime = process.burstTime;
+        process.waitingTime = 0f;
+        process.turnaroundTime = 0f;
+        process.completionTime = 0f;
+    }
+
+    statsText.text = "";
 }
+    }
