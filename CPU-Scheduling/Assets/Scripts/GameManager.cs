@@ -138,8 +138,8 @@ public class GameManager : MonoBehaviour
     private void UpdateProcessVisual(GameObject processObj, float progress, ProcessData process)
     {
         // Update position
-        Vector3 startPos = new Vector3(-5f, 0f, 0f);
-        Vector3 endPos = new Vector3(5f, 0f, 0f);
+        Vector3 startPos = new Vector3(-6f, 0f, 0f);
+        Vector3 endPos = new Vector3(6f, 0f, 0f);
         processObj.transform.position = Vector3.Lerp(startPos, endPos, progress);
         
         // Update progress text
@@ -217,29 +217,34 @@ public class GameManager : MonoBehaviour
         CalculateAndDisplayStats();
     }
 
-    private System.Collections.IEnumerator RunFCFS()
+ private System.Collections.IEnumerator RunFCFS()
+{
+    List<ProcessData> sortedProcesses = new List<ProcessData>(processes);
+    sortedProcesses.Sort((a, b) => a.arrivalTime.CompareTo(b.arrivalTime));
+
+    float currentTime = 0f;
+
+    foreach (ProcessData process in sortedProcesses)
     {
-        List<ProcessData> sortedProcesses = new List<ProcessData>(processes);
-        sortedProcesses.Sort((a, b) => a.arrivalTime.CompareTo(b.arrivalTime));
-
-        float currentTime = 0f;
-
-        foreach (ProcessData process in sortedProcesses)
+        while (currentTime < process.arrivalTime)
         {
-            while (currentTime < process.arrivalTime)
-            {
-                currentTime += Time.deltaTime;
-                yield return null;
-            }
+            currentTime += Time.deltaTime;
+            yield return null;
+        }
 
-            GameObject processObj = CreateProcessVisual(process);
+        GameObject processObj = CreateProcessVisual(process);
+        if (processObj != null)
+        {
             PlaySound(processStartSound);
 
             float executionTime = 0f;
             while (executionTime < process.burstTime)
             {
                 executionTime += Time.deltaTime;
-                UpdateProcessVisual(processObj, executionTime / process.burstTime, process);
+                if (processObj != null)
+                {
+                    UpdateProcessVisual(processObj, executionTime / process.burstTime, process);
+                }
                 yield return null;
             }
 
@@ -248,37 +253,54 @@ public class GameManager : MonoBehaviour
             process.turnaroundTime = process.completionTime - process.arrivalTime;
             process.waitingTime = process.turnaroundTime - process.burstTime;
 
-            Destroy(processObj, 1f);
-        }
-    }
-
-    private System.Collections.IEnumerator RunSJF()
-    {
-        List<ProcessData> remainingProcesses = new List<ProcessData>(processes);
-        float currentTime = 0f;
-
-        while (remainingProcesses.Count > 0)
-        {
-            List<ProcessData> availableProcesses = remainingProcesses.FindAll(p => p.arrivalTime <= currentTime);
-
-            if (availableProcesses.Count == 0)
+            // Add delay before destroying the object
+            float delayTime = 0f;
+            while (delayTime < 0.3f)
             {
-                currentTime += Time.deltaTime;
+                delayTime += Time.deltaTime;
                 yield return null;
-                continue;
             }
 
-            ProcessData shortestJob = availableProcesses.OrderBy(p => p.burstTime).First();
-            remainingProcesses.Remove(shortestJob);
+            if (processObj != null)
+            {
+                Destroy(processObj);
+                processObjects.Remove(processObj);
+            }
+        }
+    }
+}
+private System.Collections.IEnumerator RunSJF()
+{
+    List<ProcessData> remainingProcesses = new List<ProcessData>(processes);
+    float currentTime = 0f;
 
-            GameObject processObj = CreateProcessVisual(shortestJob);
+    while (remainingProcesses.Count > 0)
+    {
+        List<ProcessData> availableProcesses = remainingProcesses.FindAll(p => p.arrivalTime <= currentTime);
+
+        if (availableProcesses.Count == 0)
+        {
+            currentTime += Time.deltaTime;
+            yield return null;
+            continue;
+        }
+
+        ProcessData shortestJob = availableProcesses.OrderBy(p => p.burstTime).First();
+        remainingProcesses.Remove(shortestJob);
+
+        GameObject processObj = CreateProcessVisual(shortestJob);
+        if (processObj != null)
+        {
             PlaySound(processStartSound);
 
             float executionTime = 0f;
             while (executionTime < shortestJob.burstTime)
             {
                 executionTime += Time.deltaTime;
-                UpdateProcessVisual(processObj, executionTime / shortestJob.burstTime, shortestJob);
+                if (processObj != null)
+                {
+                    UpdateProcessVisual(processObj, executionTime / shortestJob.burstTime, shortestJob);
+                }
                 yield return null;
             }
 
@@ -287,34 +309,49 @@ public class GameManager : MonoBehaviour
             shortestJob.turnaroundTime = shortestJob.completionTime - shortestJob.arrivalTime;
             shortestJob.waitingTime = shortestJob.turnaroundTime - shortestJob.burstTime;
 
-            Destroy(processObj, 1f);
+            // Add delay before destroying the object
+            float delayTime = 0f;
+            while (delayTime < 0.3f)
+            {
+                delayTime += Time.deltaTime;
+                yield return null;
+            }
+
+            if (processObj != null)
+            {
+                Destroy(processObj);
+                processObjects.Remove(processObj);
+            }
         }
     }
+}
+  private System.Collections.IEnumerator RunRoundRobin()
+{
+    Queue<ProcessData> processQueue = new Queue<ProcessData>();
+    List<ProcessData> remainingProcesses = new List<ProcessData>(processes);
+    float currentTime = 0f;
 
-    private System.Collections.IEnumerator RunRoundRobin()
+    while (remainingProcesses.Count > 0 || processQueue.Count > 0)
     {
-        Queue<ProcessData> processQueue = new Queue<ProcessData>();
-        List<ProcessData> remainingProcesses = new List<ProcessData>(processes);
-        float currentTime = 0f;
-
-        while (remainingProcesses.Count > 0 || processQueue.Count > 0)
+        List<ProcessData> newProcesses = remainingProcesses.FindAll(p => p.arrivalTime <= currentTime);
+        foreach (ProcessData process in newProcesses)
         {
-            List<ProcessData> newProcesses = remainingProcesses.FindAll(p => p.arrivalTime <= currentTime);
-            foreach (ProcessData process in newProcesses)
-            {
-                processQueue.Enqueue(process);
-                remainingProcesses.Remove(process);
-            }
+            processQueue.Enqueue(process);
+            remainingProcesses.Remove(process);
+        }
 
-            if (processQueue.Count == 0)
-            {
-                currentTime += Time.deltaTime;
-                yield return null;
-                continue;
-            }
+        if (processQueue.Count == 0)
+        {
+            currentTime += Time.deltaTime;
+            yield return null;
+            continue;
+        }
 
-            ProcessData currentProcess = processQueue.Dequeue();
-            GameObject processObj = CreateProcessVisual(currentProcess);
+        ProcessData currentProcess = processQueue.Dequeue();
+        GameObject processObj = CreateProcessVisual(currentProcess);
+        
+        if (processObj != null)
+        {
             PlaySound(processStartSound);
 
             float executeTime = Mathf.Min(timeQuantum, currentProcess.remainingTime);
@@ -323,8 +360,11 @@ public class GameManager : MonoBehaviour
             while (executionProgress < executeTime)
             {
                 executionProgress += Time.deltaTime;
-                float totalProgress = 1f - (currentProcess.remainingTime - executionProgress) / currentProcess.burstTime;
-                UpdateProcessVisual(processObj, totalProgress, currentProcess);
+                if (processObj != null)
+                {
+                    float totalProgress = 1f - (currentProcess.remainingTime - executionProgress) / currentProcess.burstTime;
+                    UpdateProcessVisual(processObj, totalProgress, currentProcess);
+                }
                 yield return null;
             }
 
@@ -341,39 +381,70 @@ public class GameManager : MonoBehaviour
                 currentProcess.completionTime = currentTime;
                 currentProcess.turnaroundTime = currentProcess.completionTime - currentProcess.arrivalTime;
                 currentProcess.waitingTime = currentProcess.turnaroundTime - currentProcess.burstTime;
+
+                // Add delay before destroying the object
+                float delayTime = 0f;
+                while (delayTime < 0.3f)
+                {
+                    delayTime += Time.deltaTime;
+                    yield return null;
+                }
             }
 
-            Destroy(processObj, 1f);
+            if (processObj != null)
+            {
+                Destroy(processObj);
+                processObjects.Remove(processObj);
+            }
         }
     }
-
-    private void CalculateAndDisplayStats()
+}
+private void CalculateAndDisplayStats()
+{
+    float totalWaitingTime = 0f;
+    float totalTurnaroundTime = 0f;
+    
+    string detailedStats = "Process Statistics:\n\n";
+    
+    // Create lists to store individual process details
+    List<string> processIds = new List<string>();
+    List<string> waitingTimes = new List<string>();
+    List<string> turnaroundTimes = new List<string>();
+    List<string> completionTimes = new List<string>();
+    
+    foreach (ProcessData process in processes)
     {
-        float totalWaitingTime = 0f;
-        float totalTurnaroundTime = 0f;
+        totalWaitingTime += process.waitingTime;
+        totalTurnaroundTime += process.turnaroundTime;
         
-        string detailedStats = "Process Statistics:\n\n";
-        
-        foreach (ProcessData process in processes)
-        {
-            totalWaitingTime += process.waitingTime;
-            totalTurnaroundTime += process.turnaroundTime;
-            
-            detailedStats += $"Process {process.processId}:\n" +
-                            $"Waiting Time: {process.waitingTime:F2}\n" +
-                            $"Turnaround Time: {process.turnaroundTime:F2}\n" +
-                            $"Completion Time: {process.completionTime:F2}\n\n";
-        }
-        
-        float avgWaitingTime = totalWaitingTime / processes.Count;
-        float avgTurnaroundTime = totalTurnaroundTime / processes.Count;
-        
-        detailedStats += $"\nAverage Waiting Time: {avgWaitingTime:F2}\n" +
-                        $"Average Turnaround Time: {avgTurnaroundTime:F2}\n\n" +
-                        $"Total Processes: {processes.Count}";
-        
-        statsText.text = detailedStats;
+        processIds.Add($"Process {process.processId}");
+        waitingTimes.Add($"{process.waitingTime:F2}");
+        turnaroundTimes.Add($"{process.turnaroundTime:F2}");
+        completionTimes.Add($"{process.completionTime:F2}");
     }
+    
+    float avgWaitingTime = totalWaitingTime / processes.Count;
+    float avgTurnaroundTime = totalTurnaroundTime / processes.Count;
+    
+    // Format the statistics in columns
+    detailedStats += string.Format("{0,-15}{1,-15}{2,-15}{3,-15}\n",
+        "Process", "W.T", "T.T", "C.T");
+    
+    detailedStats += string.Format("{0,-15}{1,-15}{2,-15}{3,-15}\n\n",
+        "------------", "    ----", "     ------", "        ------");
+    
+    for (int i = 0; i < processes.Count; i++)
+    {
+        detailedStats += string.Format("{0,-15}{1,-15}{2,-15}{3,-15}\n",
+            processIds[i], waitingTimes[i], turnaroundTimes[i], completionTimes[i]);
+    }
+    
+    detailedStats += $"\nAverage Waiting Time: {avgWaitingTime:F2}\n" +
+                    $"Average Turnaround Time: {avgTurnaroundTime:F2}\n\n" +
+                    $"Total Processes: {processes.Count}";
+    
+    statsText.text = detailedStats;
+}
 
     private void ResetSimulation()
     {
