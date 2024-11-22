@@ -194,8 +194,12 @@ private void UpdateProcessVisual(GameObject processObj, float progress, ProcessD
             processText.text = $"P{process.processId}\nComplete!";
         }
     }
+<<<<<<< Updated upstream
 }
 private void Update()
+=======
+}private void Update()
+>>>>>>> Stashed changes
 {
     // Ensure text always faces camera
     Camera mainCamera = Camera.main;
@@ -384,6 +388,10 @@ private System.Collections.IEnumerator RunSJF()
     }
 }
 // Fix 1: RunRoundRobin - Adding proper waiting time calculation and fixing time tracking
+<<<<<<< Updated upstream
+=======
+// Fix 1: RunRoundRobin - Adding proper waiting time calculation and fixing time tracking
+>>>>>>> Stashed changes
 private System.Collections.IEnumerator RunRoundRobin()
 {
     Queue<ProcessData> processQueue = new Queue<ProcessData>();
@@ -484,6 +492,11 @@ private System.Collections.IEnumerator RunRoundRobin()
         }
     }
 }
+<<<<<<< Updated upstream
+=======
+
+// Fix 2: CalculateAndDisplayStats - Adding throughput and CPU utilization metrics
+>>>>>>> Stashed changes
 private void CalculateAndDisplayStats()
 {
     float totalWaitingTime = 0f;
@@ -514,6 +527,10 @@ private void CalculateAndDisplayStats()
     float avgWaitingTime = totalWaitingTime / processes.Count;
     float avgTurnaroundTime = totalTurnaroundTime / processes.Count;
     
+<<<<<<< Updated upstream
+=======
+    
+>>>>>>> Stashed changes
     detailedStats += string.Format("{0,-15}{1,-15}{2,-15}{3,-15}\n",
         "Process", "W.T", "T.T", "C.T");
     
@@ -532,7 +549,10 @@ private void CalculateAndDisplayStats()
     
     statsText.text = detailedStats;
 }
+<<<<<<< Updated upstream
 
+=======
+>>>>>>> Stashed changes
    private void ResetSimulation()
 {
     StopAllCoroutines();
